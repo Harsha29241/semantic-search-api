@@ -1,0 +1,59 @@
+services:
+
+  db:
+    image: pgvector/pgvector:pg16
+
+    container_name: semantic-search-db
+
+    environment:
+      POSTGRES_DB: semantic_search
+      POSTGRES_USER: harsha
+      POSTGRES_PASSWORD: harsha
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U harsha -d semantic_search"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: semantic-search-api
+
+    env_file:
+      - .env
+
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: semantic_search
+      DB_USER: harsha
+      DB_PASSWORD: harsha
+
+    ports:
+      - "8000:8000"
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    volumes:
+      - ./uploaded_documents:/app/uploaded_documents
+
+
+volumes:
+  postgres_data:
