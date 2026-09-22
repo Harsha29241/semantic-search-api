@@ -29,35 +29,30 @@ The system allows users to upload PDF documents, extract and intelligently chunk
 ---
 
 ## Architecture
+## Architecture
 
-```text
-                    Client
-                      |
-                      v
-                FastAPI API
-                      |
-          +-----------+-----------+
-          |                       |
-          v                       v
-     PDF Upload              Search Query
-          |                       |
-          v                       v
-    Text Extraction        Query Embedding
-          |                       |
-          v                       v
-    Intelligent Chunking    Vector Search
-          |                       |
-          v                       v
-     Text Embeddings       Keyword Search
-          |                       |
-          v                       v
-      PostgreSQL          Hybrid Scoring
-       + pgvector               |
-          |                     v
-          |                Cross-Encoder
-          |                 Re-ranking
-          |                     |
-          +----------+----------+
-                     |
-                     v
-              Ranked Results
+```mermaid
+flowchart TD
+    A[PDF Document Upload] --> B[FastAPI]
+    B --> C[PDF Text Extraction]
+    C --> D[Intelligent Chunking]
+    D --> E[Sentence Transformer]
+    E --> F[Vector Embeddings]
+
+    F --> G[(PostgreSQL + pgvector)]
+
+    H[User Query] --> I[Query Embedding]
+    I --> G
+
+    G --> J[Semantic Search]
+    H --> K[Keyword Search]
+
+    J --> L[Hybrid Scoring]
+    K --> L
+
+    L --> M[Cross-Encoder Re-ranking]
+    M --> N[Ranked Search Results]
+
+    B --> O[API Key Authentication]
+    B --> P[Rate Limiting]
+    B --> Q[Response Caching]
