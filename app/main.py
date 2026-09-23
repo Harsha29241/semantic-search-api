@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from dotenv import load_dotenv
+
 from fastapi import (
     FastAPI,
     UploadFile,
@@ -12,6 +13,7 @@ from fastapi import (
     Header,
     Request,
 )
+
 from pydantic import BaseModel
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -20,12 +22,15 @@ from slowapi.util import get_remote_address
 
 from app.services.ingestion_service import ingest_document
 from app.services.embedding_service import generate_embedding
+from app.services.logging_service import configure_logging
+
 from app.services.document_service import (
     search_chunks,
     get_all_documents,
     get_document_by_id,
     get_document_by_filename,
 )
+
 from app.services.cache_service import (
     make_cache_key,
     get_semantic_cache,
@@ -35,6 +40,7 @@ from app.services.cache_service import (
     clear_search_cache,
     get_cache_stats,
 )
+
 from app.services.reranker_service import rerank
 
 
@@ -57,7 +63,9 @@ if not API_KEY:
 # RATE LIMITER
 # ============================================================
 
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(
+    key_func=get_remote_address
+)
 
 
 # ============================================================
@@ -71,6 +79,7 @@ app = FastAPI(
 )
 
 app.state.limiter = limiter
+
 app.add_exception_handler(
     RateLimitExceeded,
     _rate_limit_exceeded_handler,
@@ -153,7 +162,9 @@ class DocumentResponse(BaseModel):
 # AUTHENTICATION
 # ============================================================
 
-def verify_api_key(x_api_key: Optional[str]):
+def verify_api_key(
+    x_api_key: Optional[str]
+):
     """
     Validate the API key supplied through X-API-Key header.
     """
@@ -239,6 +250,7 @@ async def upload_document(
         existing_document_id = get_document_by_filename(
             safe_filename
         )
+
     except Exception as error:
         raise HTTPException(
             status_code=500,
@@ -264,6 +276,7 @@ async def upload_document(
 
     try:
         content = await file.read()
+
     except Exception as error:
         raise HTTPException(
             status_code=400,
@@ -345,7 +358,7 @@ async def upload_document(
         )
 
     # --------------------------------------------------------
-    # Clear search caches because database changed
+    # Clear search caches
     # --------------------------------------------------------
 
     clear_search_cache()
@@ -429,10 +442,11 @@ def search(
         document_id=document_id,
     )
 
-    cached_results = get_semantic_cache(cache_key)
+    cached_results = get_semantic_cache(
+        cache_key
+    )
 
     if cached_results is not None:
-
         return {
             "query": q,
             "document_id": document_id,
@@ -566,7 +580,9 @@ def hybrid_search(
 
     if document_id is not None:
 
-        document = get_document_by_id(document_id)
+        document = get_document_by_id(
+            document_id
+        )
 
         if document is None:
             raise HTTPException(
@@ -587,10 +603,11 @@ def hybrid_search(
         document_id=document_id,
     )
 
-    cached_results = get_hybrid_cache(cache_key)
+    cached_results = get_hybrid_cache(
+        cache_key
+    )
 
     if cached_results is not None:
-
         return {
             "query": q,
             "document_id": document_id,
@@ -722,7 +739,6 @@ def hybrid_search(
     for row in rows:
 
         content = row[4]
-
         content_lower = content.lower()
 
         keyword_matches = sum(
@@ -808,7 +824,9 @@ def hybrid_search(
 
         for index, score in reranked:
 
-            item = rerank_candidates[index].copy()
+            item = rerank_candidates[
+                index
+            ].copy()
 
             item["rerank_score"] = round(
                 float(score),
@@ -822,7 +840,9 @@ def hybrid_search(
             reverse=True,
         )
 
-        final_results = final_results[:limit]
+        final_results = final_results[
+            :limit
+        ]
 
     else:
 
@@ -945,7 +965,6 @@ def get_document(
     verify_api_key(x_api_key)
 
     if document_id < 1:
-
         raise HTTPException(
             status_code=400,
             detail=(
@@ -971,7 +990,6 @@ def get_document(
         )
 
     if document is None:
-
         raise HTTPException(
             status_code=404,
             detail="Document not found",
@@ -982,3 +1000,10 @@ def get_document(
         "filename": document[1],
         "chunk_count": document[2],
     }
+
+
+# ============================================================
+# LOGGING CONFIGURATION
+# ============================================================
+
+configure_logging(app)

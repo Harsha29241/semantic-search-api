@@ -4,3 +4,5 @@ __pycache__/
 .pytest_cache/
 uploaded_documents/
 .DS_Store
+sample_documents/*
+!sample_documents/sample.pdf

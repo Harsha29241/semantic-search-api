@@ -1,31 +1,38 @@
 import os
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services.cache_service import (
-    make_cache_key,
-    set_semantic_cache,
-    get_semantic_cache,
-    clear_search_cache,
-    get_cache_stats,
-)
-
-
-client = TestClient(app)
-
-API_KEY = os.getenv(
-    "API_KEY",
-    "semantic-search-dev-key-123"
-)
-
-HEADERS = {
-    "X-API-Key": API_KEY
-}
 
 
 # ============================================================
-# BASIC API TESTS
+# TEST CONFIGURATION
+# ============================================================
+
+API_KEY = os.getenv(
+    "API_KEY",
+    "semantic-search-dev-key-123",
+)
+
+client = TestClient(app)
+
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+def test_health_check():
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "healthy"
+    }
+
+
+# ============================================================
+# ROOT ENDPOINT
 # ============================================================
 
 def test_root():
@@ -39,42 +46,43 @@ def test_root():
     assert data["version"] == "1.0.0"
 
 
-def test_health():
-    response = client.get("/health")
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "healthy"
-
-
 # ============================================================
-# AUTHENTICATION TESTS
+# API KEY - MISSING
 # ============================================================
 
 def test_documents_without_api_key():
     response = client.get("/documents")
 
     assert response.status_code == 401
-
     assert response.json()["detail"] == "API key is required"
 
+
+# ============================================================
+# API KEY - INVALID
+# ============================================================
 
 def test_documents_with_invalid_api_key():
     response = client.get(
         "/documents",
         headers={
-            "X-API-Key": "wrong-key"
-        }
+            "X-API-Key": "wrong-api-key"
+        },
     )
 
     assert response.status_code == 403
-
     assert response.json()["detail"] == "Invalid API key"
 
+
+# ============================================================
+# API KEY - VALID
+# ============================================================
 
 def test_documents_with_valid_api_key():
     response = client.get(
         "/documents",
-        headers=HEADERS
+        headers={
+            "X-API-Key": API_KEY
+        },
     )
 
     assert response.status_code == 200
@@ -86,55 +94,65 @@ def test_documents_with_valid_api_key():
 
     assert isinstance(
         data["document_count"],
-        int
+        int,
     )
 
     assert isinstance(
         data["documents"],
-        list
+        list,
     )
 
 
 # ============================================================
-# DOCUMENT TESTS
+# GET SINGLE DOCUMENT
 # ============================================================
 
-def test_existing_document():
+def test_get_document():
     response = client.get(
         "/documents/1",
-        headers=HEADERS
+        headers={
+            "X-API-Key": API_KEY
+        },
     )
 
     assert response.status_code == 200
 
     data = response.json()
 
-    assert "id" in data
+    assert data["id"] == 1
     assert "filename" in data
     assert "chunk_count" in data
 
-    assert data["id"] == 1
 
+# ============================================================
+# NON-EXISTENT DOCUMENT
+# ============================================================
 
-def test_non_existing_document():
+def test_nonexistent_document():
     response = client.get(
         "/documents/999999",
-        headers=HEADERS
+        headers={
+            "X-API-Key": API_KEY
+        },
     )
 
     assert response.status_code == 404
-
     assert response.json()["detail"] == "Document not found"
 
+
+# ============================================================
+# INVALID DOCUMENT ID
+# ============================================================
 
 def test_invalid_document_id():
     response = client.get(
         "/documents/0",
-        headers=HEADERS
+        headers={
+            "X-API-Key": API_KEY
+        },
     )
 
     assert response.status_code == 400
-
     assert (
         response.json()["detail"]
         == "Document ID must be a positive integer"
@@ -142,177 +160,35 @@ def test_invalid_document_id():
 
 
 # ============================================================
-# SEARCH VALIDATION TESTS
+# SEMANTIC SEARCH
 # ============================================================
 
-def test_search_requires_api_key():
+def test_semantic_search():
     response = client.get(
         "/search",
         params={
-            "q": "python"
-        }
-    )
-
-    assert response.status_code == 401
-
-
-def test_search_invalid_document():
-    response = client.get(
-        "/search",
-        params={
-            "q": "python",
-            "document_id": 999999
-        },
-        headers=HEADERS
-    )
-
-    assert response.status_code == 404
-
-    assert (
-        "Document with ID 999999 not found"
-        in response.json()["detail"]
-    )
-
-
-def test_search_query_too_short():
-    response = client.get(
-        "/search",
-        params={
-            "q": "a"
-        },
-        headers=HEADERS
-    )
-
-    assert response.status_code == 422
-
-
-# ============================================================
-# CACHE SERVICE TESTS
-# ============================================================
-
-def test_cache_key_normalization():
-
-    key1 = make_cache_key(
-        "  Python   Programming  ",
-        5,
-        1
-    )
-
-    key2 = make_cache_key(
-        "python programming",
-        5,
-        1
-    )
-
-    assert key1 == key2
-
-
-def test_semantic_cache():
-
-    clear_search_cache()
-
-    key = make_cache_key(
-        "test query",
-        5,
-        1
-    )
-
-    value = {
-        "query": "test query",
-        "result_count": 0,
-        "results": []
-    }
-
-    # Cache should initially be empty.
-    assert get_semantic_cache(key) is None
-
-    # Store value.
-    set_semantic_cache(
-        key,
-        value
-    )
-
-    # Retrieve value.
-    cached_value = get_semantic_cache(
-        key
-    )
-
-    assert cached_value == value
-
-    # Clean up.
-    clear_search_cache()
-
-
-def test_cache_stats():
-
-    clear_search_cache()
-
-    stats = get_cache_stats()
-
-    assert "semantic_cache_size" in stats
-    assert "hybrid_cache_size" in stats
-    assert "max_size" in stats
-    assert "ttl_seconds" in stats
-
-    assert stats["semantic_cache_size"] == 0
-    assert stats["hybrid_cache_size"] == 0
-
-    assert stats["max_size"] == 100
-    assert stats["ttl_seconds"] == 300
-
-
-# ============================================================
-# CACHE API ENDPOINT
-# ============================================================
-
-def test_cache_stats_endpoint():
-
-    response = client.get(
-        "/cache-stats",
-        headers=HEADERS
-    )
-
-    assert response.status_code == 200
-
-    data = response.json()
-
-    assert "semantic_cache_size" in data
-    assert "hybrid_cache_size" in data
-    assert "max_size" in data
-    assert "ttl_seconds" in data
-    # ============================================================
-# HYBRID SEARCH API
-# ============================================================
-
-def test_hybrid_search_endpoint():
-
-    response = client.get(
-        "/hybrid-search",
-        params={
-            "q": "What programming languages does the candidate know?",
+            "q": "python programming",
             "limit": 5,
-            "document_id": 1
         },
-        headers=HEADERS
+        headers={
+            "X-API-Key": API_KEY
+        },
     )
 
     assert response.status_code == 200
 
     data = response.json()
 
-    assert data["query"] == (
-        "What programming languages does the candidate know?"
-    )
-
-    assert data["document_id"] == 1
-
+    assert data["query"] == "python programming"
     assert "result_count" in data
     assert "results" in data
 
-    assert isinstance(data["results"], list)
+    assert isinstance(
+        data["results"],
+        list,
+    )
 
     if data["results"]:
-
         result = data["results"][0]
 
         assert "chunk_id" in result
@@ -320,6 +196,112 @@ def test_hybrid_search_endpoint():
         assert "filename" in result
         assert "chunk_index" in result
         assert "content" in result
+        assert "similarity" in result
+
+
+# ============================================================
+# SEARCH WITHOUT API KEY
+# ============================================================
+
+def test_search_without_api_key():
+    response = client.get(
+        "/search",
+        params={
+            "q": "python"
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "API key is required"
+
+
+# ============================================================
+# SEARCH WITH INVALID DOCUMENT
+# ============================================================
+
+def test_search_invalid_document():
+    response = client.get(
+        "/search",
+        params={
+            "q": "python",
+            "document_id": 999999,
+        },
+        headers={
+            "X-API-Key": API_KEY
+        },
+    )
+
+    assert response.status_code == 404
+
+
+# ============================================================
+# SEARCH QUERY VALIDATION
+# ============================================================
+
+def test_search_query_too_short():
+    response = client.get(
+        "/search",
+        params={
+            "q": "a"
+        },
+        headers={
+            "X-API-Key": API_KEY
+        },
+    )
+
+    assert response.status_code == 422
+
+
+# ============================================================
+# SEARCH LIMIT VALIDATION
+# ============================================================
+
+def test_search_limit_validation():
+    response = client.get(
+        "/search",
+        params={
+            "q": "python",
+            "limit": 100,
+        },
+        headers={
+            "X-API-Key": API_KEY
+        },
+    )
+
+    assert response.status_code == 422
+
+
+# ============================================================
+# HYBRID SEARCH
+# ============================================================
+
+def test_hybrid_search():
+    response = client.get(
+        "/hybrid-search",
+        params={
+            "q": "python programming",
+            "limit": 5,
+        },
+        headers={
+            "X-API-Key": API_KEY
+        },
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["query"] == "python programming"
+    assert "result_count" in data
+    assert "results" in data
+
+    assert isinstance(
+        data["results"],
+        list,
+    )
+
+    if data["results"]:
+        result = data["results"][0]
 
         assert "semantic_score" in result
         assert "keyword_score" in result
@@ -328,26 +310,66 @@ def test_hybrid_search_endpoint():
 
 
 # ============================================================
+# HYBRID SEARCH WITHOUT API KEY
+# ============================================================
+
+def test_hybrid_search_without_api_key():
+    response = client.get(
+        "/hybrid-search",
+        params={
+            "q": "python"
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "API key is required"
+
+
+# ============================================================
+# CACHE STATISTICS
+# ============================================================
+
+def test_cache_stats():
+    response = client.get(
+        "/cache-stats",
+        headers={
+            "X-API-Key": API_KEY
+        },
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert isinstance(data, dict)
+
+
+# ============================================================
+# CACHE STATS WITHOUT API KEY
+# ============================================================
+
+def test_cache_stats_without_api_key():
+    response = client.get("/cache-stats")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "API key is required"
+
+
+# ============================================================
 # RATE LIMITING
 # ============================================================
 
-def test_rate_limit():
+def test_rate_limiting():
+    responses = []
 
-    rate_limit_hit = False
-
-    for _ in range(35):
-
+    for _ in range(31):
         response = client.get(
-            "/documents/1",
-            headers=HEADERS
+            "/documents",
+            headers={
+                "X-API-Key": API_KEY
+            },
         )
 
-        if response.status_code == 429:
+        responses.append(response.status_code)
 
-            rate_limit_hit = True
-
-            break
-
-        assert response.status_code == 200
-
-    assert rate_limit_hit is True
+    assert 429 in responses

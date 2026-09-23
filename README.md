@@ -1,58 +1,80 @@
 # Semantic Search API
 
-An AI-powered document search and retrieval system built with FastAPI, PostgreSQL, pgvector, and Sentence Transformers.
+AI-powered document search and retrieval system built with FastAPI, PostgreSQL, pgvector, and Sentence Transformers.
 
-The system allows users to upload PDF documents, extract and intelligently chunk their content, generate vector embeddings, store them in PostgreSQL, and retrieve relevant information using semantic and hybrid search.
+The system allows users to upload PDF documents, extract and intelligently chunk their text, generate vector embeddings, store them in PostgreSQL, and search the documents using semantic similarity.
+
+It also includes hybrid search with keyword matching and CrossEncoder re-ranking to improve retrieval relevance.
 
 ---
 
 ## Features
 
-- PDF document upload and text extraction
+- PDF document upload and processing
+- PDF text extraction using PyMuPDF
 - Intelligent text chunking with overlap
-- Local sentence-transformer embeddings
-- Vector similarity search using pgvector
-- Semantic document search
-- Keyword + semantic hybrid search
-- Cross-Encoder re-ranking
+- Semantic embeddings using Sentence Transformers
+- Vector storage using PostgreSQL + pgvector
+- Semantic similarity search
+- Hybrid keyword + semantic search
+- CrossEncoder-based result re-ranking
 - Document-level filtering
-- Search result caching with TTL
 - API key authentication
-- Request rate limiting
-- Input validation and error handling
-- Pydantic response validation
-- PostgreSQL document and chunk metadata
-- Automated API and service tests
+- Request validation
+- Rate limiting with SlowAPI
+- In-memory TTL caching
+- Centralized application logging
+- REST API built with FastAPI
+- Automatic Swagger/OpenAPI documentation
 - Docker and Docker Compose support
-- Interactive Swagger API documentation
+- Automated API tests with pytest
 
 ---
 
 ## Architecture
-## Architecture
 
-```mermaid
-flowchart TD
-    A[PDF Document Upload] --> B[FastAPI]
-    B --> C[PDF Text Extraction]
-    C --> D[Intelligent Chunking]
-    D --> E[Sentence Transformer]
-    E --> F[Vector Embeddings]
-
-    F --> G[(PostgreSQL + pgvector)]
-
-    H[User Query] --> I[Query Embedding]
-    I --> G
-
-    G --> J[Semantic Search]
-    H --> K[Keyword Search]
-
-    J --> L[Hybrid Scoring]
-    K --> L
-
-    L --> M[Cross-Encoder Re-ranking]
-    M --> N[Ranked Search Results]
-
-    B --> O[API Key Authentication]
-    B --> P[Rate Limiting]
-    B --> Q[Response Caching]
+```text
+                    ┌─────────────────────┐
+                    │      Client         │
+                    │  Browser / Postman  │
+                    │      / cURL          │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │      FastAPI        │
+                    │      REST API       │
+                    └──────────┬──────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              │                │                │
+              ▼                ▼                ▼
+        Authentication    Rate Limiting      Caching
+              │                │                │
+              └────────────────┼────────────────┘
+                               │
+                 ┌─────────────┴─────────────┐
+                 │                           │
+                 ▼                           ▼
+        Document Ingestion             Search Pipeline
+                 │                           │
+        ┌────────┴────────┐          ┌───────┴────────┐
+        │                 │          │                │
+        ▼                 ▼          ▼                ▼
+   PDF Extraction    Chunking    Embedding       Keyword Search
+        │                 │          │                │
+        └────────┬────────┘          └───────┬────────┘
+                 │                           │
+                 ▼                           ▼
+        Sentence Transformer          Hybrid Scoring
+                 │                           │
+                 ▼                           ▼
+          Vector Storage             CrossEncoder
+                 │                    Re-ranking
+                 │                           │
+                 └─────────────┬─────────────┘
+                               ▼
+                    PostgreSQL + pgvector
+                               │
+                               ▼
+                       Ranked Search Results
