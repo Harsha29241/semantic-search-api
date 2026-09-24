@@ -1,185 +1,304 @@
+import os
 from threading import Lock
 
-from sentence_transformers import CrossEncoder
+import torch
 
 
-# CrossEncoder model used for reranking
-MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
-# Lazy-loaded model
+# Memory-efficient CrossEncoder.
+#
+# This keeps the CrossEncoder reranking feature while using
+# substantially less memory than MiniLM-L6.
+MODEL_NAME = (
+    "cross-encoder/ms-marco-TinyBERT-L2-v2"
+)
+
+
+# ============================================================
+# CPU / MEMORY CONFIGURATION
+# ============================================================
+
+try:
+    torch.set_num_threads(
+        int(os.getenv("TORCH_NUM_THREADS", "1"))
+    )
+except Exception:
+    pass
+
+try:
+    torch.set_num_interop_threads(1)
+except Exception:
+    pass
+
+
+# ============================================================
+# RERANKER ENABLE / DISABLE
+# ============================================================
+
+ENABLE_RERANKER = (
+    os.getenv(
+        "ENABLE_RERANKER",
+        "false",
+    ).lower()
+    in ("true", "1", "yes")
+)
+
+
+# ============================================================
+# LAZY-LOADED MODEL
+# ============================================================
+
 _reranker_model = None
 _reranker_lock = Lock()
 
 
-def get_reranker_model():
-    """
-    Load the CrossEncoder only when reranking is actually requested.
+# ============================================================
+# GET RERANKER MODEL
+# ============================================================
 
-    Lazy loading reduces startup memory usage, which is important
-    for low-memory hosting environments such as Render Free.
-    """
+def get_reranker_model():
+
     global _reranker_model
 
+    if not ENABLE_RERANKER:
+
+        raise RuntimeError(
+            "CrossEncoder reranker is disabled. "
+            "Set ENABLE_RERANKER=true to enable it."
+        )
+
     if _reranker_model is None:
+
         with _reranker_lock:
+
             if _reranker_model is None:
+
+                from sentence_transformers import (
+                    CrossEncoder
+                )
+
                 _reranker_model = CrossEncoder(
                     MODEL_NAME,
-                    device="cpu"
+                    device="cpu",
+                    max_length=256,
                 )
+
+                _reranker_model.model.eval()
 
     return _reranker_model
 
 
+# ============================================================
+# RERANK RESULT DICTIONARIES
+# ============================================================
+
 def rerank_results(
     query: str,
-    results: list[dict]
+    results: list[dict],
 ) -> list[dict]:
     """
-    Re-rank search results using a CrossEncoder model.
+    Re-rank search results using CrossEncoder.
 
-    Each result must contain a 'content' field.
+    Each result must contain:
+        content
 
-    Returns the same results with an additional
-    'rerank_score' field.
+    Returns:
+        Results sorted by rerank_score.
     """
 
     if not results:
         return []
 
+    if not ENABLE_RERANKER:
+        return results
+
     pairs = [
-        (query, result["content"])
+        (
+            query,
+            result["content"],
+        )
         for result in results
     ]
 
-    # Load model only when required
     model = get_reranker_model()
 
-    scores = model.predict(
-        pairs,
-        batch_size=2,
-        show_progress_bar=False
-    )
+    with torch.inference_mode():
+
+        scores = model.predict(
+            pairs,
+            batch_size=2,
+            show_progress_bar=False,
+        )
 
     reranked_results = []
 
-    for result, score in zip(results, scores):
+    for result, score in zip(
+        results,
+        scores,
+    ):
 
         updated_result = result.copy()
 
-        updated_result["rerank_score"] = round(
+        updated_result[
+            "rerank_score"
+        ] = round(
             float(score),
-            4
+            4,
         )
 
-        reranked_results.append(updated_result)
+        reranked_results.append(
+            updated_result
+        )
 
-    # Highest score first
     reranked_results.sort(
-        key=lambda item: item["rerank_score"],
-        reverse=True
+        key=lambda item: item[
+            "rerank_score"
+        ],
+        reverse=True,
     )
 
     return reranked_results
 
 
+# ============================================================
+# RERANK PLAIN DOCUMENTS
+# ============================================================
+
 def rerank(
     query: str,
-    documents: list[str]
+    documents: list[str],
 ) -> list[tuple[int, float]]:
     """
     Re-rank plain document strings.
 
     Returns:
-        List of (original_index, score) tuples,
-        sorted from highest score to lowest score.
 
-    This function is used by the hybrid-search endpoint.
+        [
+            (original_index, score),
+            ...
+        ]
+
+    Sorted from highest score to lowest score.
     """
 
     if not documents:
         return []
 
+    if not ENABLE_RERANKER:
+
+        return [
+            (
+                index,
+                0.0,
+            )
+            for index in range(
+                len(documents)
+            )
+        ]
+
     pairs = [
-        (query, document)
+        (
+            query,
+            document,
+        )
         for document in documents
     ]
 
-    # Load model only when required
     model = get_reranker_model()
 
-    scores = model.predict(
-        pairs,
-        batch_size=2,
-        show_progress_bar=False
-    )
+    with torch.inference_mode():
+
+        scores = model.predict(
+            pairs,
+            batch_size=2,
+            show_progress_bar=False,
+        )
 
     scored_results = [
-        (index, float(score))
-        for index, score in enumerate(scores)
+        (
+            index,
+            float(score),
+        )
+        for index, score in enumerate(
+            scores
+        )
     ]
 
-    # Highest score first
     scored_results.sort(
         key=lambda item: item[1],
-        reverse=True
+        reverse=True,
     )
 
     return scored_results
 
 
+# ============================================================
+# CHECK RERANKER STATUS
+# ============================================================
+
+def is_reranker_enabled():
+
+    return ENABLE_RERANKER
+
+
+# ============================================================
+# LOCAL TEST
+# ============================================================
+
 if __name__ == "__main__":
 
-    query = (
-        "What programming languages "
-        "does the candidate know?"
+    print()
+    print(
+        "CrossEncoder:",
+        MODEL_NAME,
     )
 
-    sample_results = [
-        {
-            "content": (
+    print(
+        "Reranker enabled:",
+        ENABLE_RERANKER,
+    )
+
+    if not ENABLE_RERANKER:
+
+        print(
+            "Reranker is disabled."
+        )
+
+    else:
+
+        query = (
+            "What programming languages "
+            "does the candidate know?"
+        )
+
+        documents = [
+            (
                 "The candidate knows "
                 "Python, Java and SQL."
-            )
-        },
-        {
-            "content": (
+            ),
+            (
                 "The candidate worked on "
                 "an AI Resume Analyzer project."
-            )
-        },
-        {
-            "content": (
+            ),
+            (
                 "The candidate has experience "
                 "with Flask and REST APIs."
-            )
-        }
-    ]
+            ),
+        ]
 
-    print("\nTesting rerank_results():\n")
-
-    results = rerank_results(
-        query,
-        sample_results
-    )
-
-    for result in results:
-        print(result)
-
-    print("\nTesting rerank():\n")
-
-    documents = [
-        result["content"]
-        for result in sample_results
-    ]
-
-    reranked = rerank(
-        query,
-        documents
-    )
-
-    for index, score in reranked:
-        print(
-            f"Index: {index}, "
-            f"Score: {score:.4f}"
+        results = rerank(
+            query,
+            documents,
         )
+
+        print()
+
+        for index, score in results:
+
+            print(
+                f"Index: {index}, "
+                f"Score: {score:.4f}"
+            )
