@@ -1,36 +1,67 @@
-FROM python:3.12-slim
+FROM python:3.11-slim
 
-# Prevent Python from creating .pyc files
-# and make logs appear immediately.
+# ============================================================
+# PYTHON SETTINGS
+# ============================================================
+
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+# Reduce CPU thread usage and memory overhead.
+ENV OMP_NUM_THREADS=1
+ENV OPENBLAS_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+ENV VECLIB_MAXIMUM_THREADS=1
+ENV NUMEXPR_NUM_THREADS=1
+
+# Hugging Face / tokenizer settings
+ENV TOKENIZERS_PARALLELISM=false
+
+# ============================================================
+# WORKING DIRECTORY
+# ============================================================
+
 WORKDIR /app
 
-# System packages required by Python libraries.
+# ============================================================
+# SYSTEM DEPENDENCIES
+# ============================================================
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies first.
-# This improves Docker build caching.
+# ============================================================
+# PYTHON DEPENDENCIES
+# ============================================================
+
 COPY requirements.txt .
 
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# Copy application source.
-COPY app ./app
+# ============================================================
+# APPLICATION
+# ============================================================
 
-# Copy supporting directories/files.
-COPY sample_documents ./sample_documents
-COPY tests ./tests
+# ============================================================
+# APPLICATION
+# ============================================================
 
-# Create upload directory.
-RUN mkdir -p uploaded_documents
+COPY . .
 
-EXPOSE 8000
+# Explicitly include frontend
+COPY frontend ./frontend
+# ============================================================
+# RENDER PORT
+# ============================================================
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 10000
+
+# ============================================================
+# START APPLICATION
+# ============================================================
+
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000} --workers 1"]
