@@ -107,7 +107,13 @@ app = FastAPI(
 # FRONTEND UI
 # ============================================================
 
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+# ============================================================
+# FRONTEND UI
+# ============================================================
+
+FRONTEND_DIR = (
+    Path(__file__).resolve().parent.parent / "frontend"
+)
 
 if FRONTEND_DIR.exists():
 

@@ -50,10 +50,19 @@ RUN pip install --no-cache-dir --upgrade pip \
 # APPLICATION
 # ============================================================
 
+# ============================================================
+# APPLICATION
+# ============================================================
+
 COPY . .
 
-# Explicitly include frontend
-COPY frontend ./frontend
+# Verify frontend is included in the Docker image
+RUN echo "===== FRONTEND CHECK =====" \
+    && pwd \
+    && ls -la /app \
+    && ls -la /app/frontend \
+    && test -f /app/frontend/index.html \
+    && echo "===== frontend/index.html FOUND ====="
 # ============================================================
 # RENDER PORT
 # ============================================================
