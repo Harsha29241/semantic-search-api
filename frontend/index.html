@@ -165,8 +165,10 @@
             background: #0f172a;
         }
 
-        button.danger {
-            background: #dc2626;
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
         }
 
         .search-row {
@@ -209,6 +211,9 @@
             display: none;
 
             font-size: 14px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
         }
 
         .message.success {
@@ -223,6 +228,13 @@
 
             background: #fef2f2;
             color: #b91c1c;
+        }
+
+        .message.warning {
+            display: block;
+
+            background: #fffbeb;
+            color: #92400e;
         }
 
         .documents {
@@ -248,6 +260,7 @@
         .document-name {
             font-weight: 600;
             font-size: 14px;
+            word-break: break-word;
         }
 
         .document-info {
@@ -285,6 +298,7 @@
 
         .filename {
             font-weight: 700;
+            word-break: break-word;
         }
 
         .score {
@@ -310,6 +324,7 @@
             font-size: 14px;
 
             white-space: pre-wrap;
+            overflow-wrap: anywhere;
         }
 
         .meta {
@@ -365,17 +380,17 @@
             font-size: 12px;
         }
 
-        .loading {
-            opacity: 0.6;
-            pointer-events: none;
-        }
-
         .empty {
             padding: 25px;
 
             text-align: center;
 
             color: #64748b;
+        }
+
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
         }
 
         footer {
@@ -386,6 +401,11 @@
             color: #64748b;
 
             font-size: 13px;
+        }
+
+        pre {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
         }
 
         @media (max-width: 800px) {
@@ -408,6 +428,10 @@
 
             .hero h1 {
                 font-size: 25px;
+            }
+
+            .result-header {
+                flex-direction: column;
             }
         }
     </style>
@@ -432,7 +456,7 @@
 
         <div class="status">
             <span>●</span>
-            API Connected
+            <span id="connectionStatus">Checking API...</span>
         </div>
 
     </section>
@@ -458,13 +482,12 @@
                     id="apiKey"
                     type="password"
                     placeholder="Enter your API key"
+                    autocomplete="off"
                 >
 
             </div>
 
-            <button
-                onclick="saveApiKey()"
-            >
+            <button onclick="saveApiKey()">
                 Save API Key
             </button>
 
@@ -569,9 +592,7 @@
 
             </div>
 
-            <button
-                onclick="uploadDocument()"
-            >
+            <button onclick="uploadDocument()">
                 Upload & Index
             </button>
 
@@ -664,16 +685,17 @@
                 >
 
 
-                <button
-                    onclick="performSearch()"
-                >
+                <button onclick="performSearch()">
                     Search
                 </button>
 
             </div>
 
 
-            <div class="field" style="margin-top:15px;">
+            <div
+                class="field"
+                style="margin-top:15px;"
+            >
 
                 <label for="documentFilter">
                     Optional Document ID
@@ -757,7 +779,9 @@
 
     function getApiKey() {
 
-        return localStorage.getItem("semantic_api_key") || "";
+        return localStorage.getItem(
+            "semantic_api_key"
+        ) || "";
 
     }
 
@@ -799,14 +823,178 @@
         message.textContent =
             "API key saved for this browser.";
 
+        refreshDocuments();
+
     }
 
 
     function authHeaders() {
 
+        const key = getApiKey();
+
+        return key
+            ? {
+                "X-API-Key": key
+            }
+            : {};
+
+    }
+
+
+    // =========================================================
+    // SAFE API RESPONSE
+    // =========================================================
+
+    async function readApiResponse(response) {
+
+        const contentType =
+            response.headers.get(
+                "content-type"
+            ) || "";
+
+
+        const text =
+            await response.text();
+
+
+        if (
+            contentType.includes(
+                "application/json"
+            )
+        ) {
+
+            try {
+
+                return {
+                    ok: response.ok,
+                    status: response.status,
+                    data: JSON.parse(text),
+                    text: text
+                };
+
+            }
+
+            catch (error) {
+
+                return {
+                    ok: false,
+                    status: response.status,
+                    data: null,
+                    text: text,
+                    parseError: true
+                };
+
+            }
+
+        }
+
+
         return {
-            "X-API-Key": getApiKey()
+            ok: response.ok,
+            status: response.status,
+            data: null,
+            text: text
         };
+
+    }
+
+
+    function formatApiError(result) {
+
+        if (!result) {
+
+            return "Unknown server error.";
+
+        }
+
+
+        if (result.data) {
+
+            if (
+                typeof result.data.detail ===
+                "string"
+            ) {
+
+                return result.data.detail;
+
+            }
+
+
+            if (result.data.detail) {
+
+                return JSON.stringify(
+                    result.data.detail,
+                    null,
+                    2
+                );
+
+            }
+
+
+            return JSON.stringify(
+                result.data,
+                null,
+                2
+            );
+
+        }
+
+
+        if (result.status === 502) {
+
+            return (
+                "Render returned 502 Bad Gateway. " +
+                "The service may be starting or restarting. " +
+                "Please wait a few seconds and try again."
+            );
+
+        }
+
+
+        if (result.status === 503) {
+
+            return (
+                "The API service is temporarily unavailable. " +
+                "Please wait a few seconds and try again."
+            );
+
+        }
+
+
+        if (result.status === 504) {
+
+            return (
+                "The API request timed out. " +
+                "The Render service may still be starting."
+            );
+
+        }
+
+
+        if (result.text) {
+
+            const cleanText =
+                result.text
+                    .replace(/<[^>]*>/g, " ")
+                    .replace(/\s+/g, " ")
+                    .trim();
+
+
+            if (cleanText) {
+
+                return (
+                    `Server returned HTTP ${result.status}: ` +
+                    cleanText.substring(0, 500)
+                );
+
+            }
+
+        }
+
+
+        return (
+            `Request failed with HTTP ${result.status}.`
+        );
 
     }
 
@@ -842,15 +1030,43 @@
 
     async function checkHealth() {
 
+        const statusElement =
+            document.getElementById(
+                "connectionStatus"
+            );
+
         try {
 
             const response =
                 await fetch(
-                    `${API_BASE}/health`
+                    `${API_BASE}/health`,
+                    {
+                        cache: "no-store"
+                    }
                 );
 
+
+            const result =
+                await readApiResponse(
+                    response
+                );
+
+
+            if (
+                !result.ok ||
+                !result.data
+            ) {
+
+                throw new Error(
+                    formatApiError(result)
+                );
+
+            }
+
+
             const data =
-                await response.json();
+                result.data;
+
 
             document.getElementById(
                 "healthStatus"
@@ -867,6 +1083,13 @@
                     ? "ON"
                     : "OFF";
 
+
+            statusElement.textContent =
+                "API Connected";
+
+
+            return true;
+
         }
 
         catch (error) {
@@ -875,6 +1098,19 @@
                 "healthStatus"
             ).textContent =
                 "Offline";
+
+
+            document.getElementById(
+                "rerankerStatus"
+            ).textContent =
+                "-";
+
+
+            statusElement.textContent =
+                "API Unavailable";
+
+
+            return false;
 
         }
 
@@ -896,6 +1132,12 @@
             );
 
 
+        container.innerHTML =
+            `<div class="empty">
+                Loading documents...
+            </div>`;
+
+
         try {
 
             const response =
@@ -903,22 +1145,40 @@
                     `${API_BASE}/documents`,
                     {
                         headers:
-                            authHeaders()
+                            authHeaders(),
+
+                        cache:
+                            "no-store"
                     }
                 );
 
 
-            if (!response.ok) {
+            const result =
+                await readApiResponse(
+                    response
+                );
+
+
+            if (!result.ok) {
 
                 throw new Error(
-                    await response.text()
+                    formatApiError(result)
+                );
+
+            }
+
+
+            if (!result.data) {
+
+                throw new Error(
+                    formatApiError(result)
                 );
 
             }
 
 
             const data =
-                await response.json();
+                result.data;
 
 
             document.getElementById(
@@ -930,7 +1190,12 @@
             container.innerHTML = "";
 
 
-            if (!data.documents.length) {
+            if (
+                !Array.isArray(
+                    data.documents
+                ) ||
+                !data.documents.length
+            ) {
 
                 container.innerHTML =
                     `<div class="empty">
@@ -943,12 +1208,20 @@
 
 
             data.documents.forEach(
-                document => {
+                doc => {
+
+                    /*
+                     * IMPORTANT:
+                     * Do NOT call this variable "document".
+                     * It would shadow the browser's global
+                     * document object.
+                     */
 
                     const item =
-                        document.createElement(
+                        window.document.createElement(
                             "div"
                         );
+
 
                     item.className =
                         "document";
@@ -960,21 +1233,21 @@
 
                             <div class="document-name">
                                 📄 ${escapeHtml(
-                                    document.filename
+                                    doc.filename
                                 )}
                             </div>
 
                             <div class="document-info">
-                                ID: ${document.id}
+                                ID: ${doc.id}
                                 •
-                                ${document.chunk_count}
+                                ${doc.chunk_count}
                                 chunks
                             </div>
 
                         </div>
 
                         <div class="badge">
-                            ID ${document.id}
+                            ID ${doc.id}
                         </div>
 
                     `;
@@ -1011,6 +1284,7 @@
             document.getElementById(
                 "pdfFile"
             );
+
 
         const message =
             document.getElementById(
@@ -1065,8 +1339,25 @@
         }
 
 
+        if (
+            file.size >
+            10 * 1024 * 1024
+        ) {
+
+            message.className =
+                "message error";
+
+            message.textContent =
+                "File size exceeds the 10 MB limit.";
+
+            return;
+
+        }
+
+
         const formData =
             new FormData();
+
 
         formData.append(
             "file",
@@ -1097,21 +1388,32 @@
                 );
 
 
-            const data =
-                await response.json();
+            const result =
+                await readApiResponse(
+                    response
+                );
 
 
-            if (!response.ok) {
+            if (!result.ok) {
 
                 throw new Error(
-                    data.detail
-                        ? JSON.stringify(
-                            data.detail
-                        )
-                        : "Upload failed"
+                    formatApiError(result)
                 );
 
             }
+
+
+            if (!result.data) {
+
+                throw new Error(
+                    formatApiError(result)
+                );
+
+            }
+
+
+            const data =
+                result.data;
 
 
             message.className =
@@ -1119,7 +1421,7 @@
 
             message.textContent =
                 `Uploaded successfully.
-                 Document ID: ${data.document_id}`;
+Document ID: ${data.document_id}`;
 
 
             fileInput.value = "";
@@ -1236,10 +1538,12 @@
         const params =
             new URLSearchParams();
 
+
         params.set(
             "q",
             query
         );
+
 
         params.set(
             "limit",
@@ -1270,26 +1574,40 @@
                     `${API_BASE}${endpoint}?${params.toString()}`,
                     {
                         headers:
-                            authHeaders()
+                            authHeaders(),
+
+                        cache:
+                            "no-store"
                     }
                 );
 
 
-            const data =
-                await response.json();
+            const result =
+                await readApiResponse(
+                    response
+                );
 
 
-            if (!response.ok) {
+            if (!result.ok) {
 
                 throw new Error(
-                    data.detail
-                        ? JSON.stringify(
-                            data.detail
-                        )
-                        : "Search failed"
+                    formatApiError(result)
                 );
 
             }
+
+
+            if (!result.data) {
+
+                throw new Error(
+                    formatApiError(result)
+                );
+
+            }
+
+
+            const data =
+                result.data;
 
 
             message.className =
@@ -1337,7 +1655,10 @@
         container.innerHTML = "";
 
 
-        if (!data.results.length) {
+        if (
+            !data.results ||
+            !data.results.length
+        ) {
 
             container.innerHTML =
                 `<div class="empty">
@@ -1353,9 +1674,10 @@
             result => {
 
                 const item =
-                    document.createElement(
+                    window.document.createElement(
                         "div"
                     );
+
 
                 item.className =
                     "result";
@@ -1365,14 +1687,15 @@
 
 
                 if (
-                    searchType ===
-                    "semantic"
+                    searchType === "semantic"
                 ) {
 
                     scoreHtml = `
                         <span class="score">
                             Similarity:
-                            ${result.similarity}
+                            ${escapeHtml(
+                                result.similarity
+                            )}
                         </span>
                     `;
 
@@ -1383,7 +1706,9 @@
                     scoreHtml = `
                         <span class="score">
                             Hybrid:
-                            ${result.hybrid_score}
+                            ${escapeHtml(
+                                result.hybrid_score
+                            )}
                         </span>
                     `;
 
@@ -1394,37 +1719,46 @@
 
                     <span class="badge">
                         Document ID:
-                        ${result.document_id}
+                        ${escapeHtml(
+                            result.document_id
+                        )}
                     </span>
 
                     <span class="badge">
                         Chunk:
-                        ${result.chunk_index}
+                        ${escapeHtml(
+                            result.chunk_index
+                        )}
                     </span>
 
                 `;
 
 
                 if (
-                    searchType ===
-                    "hybrid"
+                    searchType === "hybrid"
                 ) {
 
                     metaHtml += `
 
                         <span class="badge">
                             Semantic:
-                            ${result.semantic_score}
+                            ${escapeHtml(
+                                result.semantic_score
+                            )}
                         </span>
 
                         <span class="badge">
                             Keyword:
-                            ${result.keyword_score}
+                            ${escapeHtml(
+                                result.keyword_score
+                            )}
                         </span>
 
                         <span class="badge">
                             Rerank:
-                            ${result.rerank_score}
+                            ${escapeHtml(
+                                result.rerank_score
+                            )}
                         </span>
 
                     `;
@@ -1491,6 +1825,10 @@
         }
 
 
+        output.textContent =
+            "Loading cache statistics...";
+
+
         try {
 
             const response =
@@ -1498,19 +1836,33 @@
                     `${API_BASE}/cache-stats`,
                     {
                         headers:
-                            authHeaders()
+                            authHeaders(),
+
+                        cache:
+                            "no-store"
                     }
                 );
 
 
-            const data =
-                await response.json();
+            const result =
+                await readApiResponse(
+                    response
+                );
 
 
-            if (!response.ok) {
+            if (!result.ok) {
 
                 throw new Error(
-                    JSON.stringify(data)
+                    formatApiError(result)
+                );
+
+            }
+
+
+            if (!result.data) {
+
+                throw new Error(
+                    formatApiError(result)
                 );
 
             }
@@ -1518,7 +1870,7 @@
 
             output.textContent =
                 JSON.stringify(
-                    data,
+                    result.data,
                     null,
                     2
                 );
@@ -1541,7 +1893,9 @@
 
     function escapeHtml(value) {
 
-        return String(value)
+        return String(
+            value ?? ""
+        )
             .replaceAll(
                 "&",
                 "&amp;"
