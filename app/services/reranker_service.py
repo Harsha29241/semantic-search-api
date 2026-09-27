@@ -1,37 +1,13 @@
+
 import os
 from threading import Lock
 
-import torch
-
 
 # ============================================================
-# CONFIGURATION
+# MODEL CONFIGURATION
 # ============================================================
 
-# Memory-efficient CrossEncoder.
-#
-# This keeps the CrossEncoder reranking feature while using
-# substantially less memory than MiniLM-L6.
-MODEL_NAME = (
-    "cross-encoder/ms-marco-TinyBERT-L2-v2"
-)
-
-
-# ============================================================
-# CPU / MEMORY CONFIGURATION
-# ============================================================
-
-try:
-    torch.set_num_threads(
-        int(os.getenv("TORCH_NUM_THREADS", "1"))
-    )
-except Exception:
-    pass
-
-try:
-    torch.set_num_interop_threads(1)
-except Exception:
-    pass
+MODEL_NAME = "cross-encoder/ms-marco-TinyBERT-L2-v2"
 
 
 # ============================================================
@@ -39,10 +15,7 @@ except Exception:
 # ============================================================
 
 ENABLE_RERANKER = (
-    os.getenv(
-        "ENABLE_RERANKER",
-        "false",
-    ).lower()
+    os.getenv("ENABLE_RERANKER", "false").lower()
     in ("true", "1", "yes")
 )
 
@@ -60,11 +33,17 @@ _reranker_lock = Lock()
 # ============================================================
 
 def get_reranker_model():
+    """
+    Load the CrossEncoder reranker only when it is enabled
+    and actually needed.
+
+    This keeps Torch and the reranker model completely out
+    of the normal application startup path when disabled.
+    """
 
     global _reranker_model
 
     if not ENABLE_RERANKER:
-
         raise RuntimeError(
             "CrossEncoder reranker is disabled. "
             "Set ENABLE_RERANKER=true to enable it."
@@ -76,9 +55,21 @@ def get_reranker_model():
 
             if _reranker_model is None:
 
-                from sentence_transformers import (
-                    CrossEncoder
-                )
+                # Import only when reranker is actually enabled.
+                import torch
+                from sentence_transformers import CrossEncoder
+
+                try:
+                    torch.set_num_threads(
+                        int(os.getenv("TORCH_NUM_THREADS", "1"))
+                    )
+                except Exception:
+                    pass
+
+                try:
+                    torch.set_num_interop_threads(1)
+                except Exception:
+                    pass
 
                 _reranker_model = CrossEncoder(
                     MODEL_NAME,
@@ -100,18 +91,19 @@ def rerank_results(
     results: list[dict],
 ) -> list[dict]:
     """
-    Re-rank search results using CrossEncoder.
+    Re-rank dictionary results using CrossEncoder.
 
     Each result must contain:
         content
 
-    Returns:
-        Results sorted by rerank_score.
+    If reranker is disabled, the original results are returned
+    unchanged.
     """
 
     if not results:
         return []
 
+    # Keep reranker disabled by default.
     if not ENABLE_RERANKER:
         return results
 
@@ -124,6 +116,8 @@ def rerank_results(
     ]
 
     model = get_reranker_model()
+
+    import torch
 
     with torch.inference_mode():
 
@@ -142,9 +136,7 @@ def rerank_results(
 
         updated_result = result.copy()
 
-        updated_result[
-            "rerank_score"
-        ] = round(
+        updated_result["rerank_score"] = round(
             float(score),
             4,
         )
@@ -154,9 +146,7 @@ def rerank_results(
         )
 
     reranked_results.sort(
-        key=lambda item: item[
-            "rerank_score"
-        ],
+        key=lambda item: item["rerank_score"],
         reverse=True,
     )
 
@@ -165,140 +155,4 @@ def rerank_results(
 
 # ============================================================
 # RERANK PLAIN DOCUMENTS
-# ============================================================
-
-def rerank(
-    query: str,
-    documents: list[str],
-) -> list[tuple[int, float]]:
-    """
-    Re-rank plain document strings.
-
-    Returns:
-
-        [
-            (original_index, score),
-            ...
-        ]
-
-    Sorted from highest score to lowest score.
-    """
-
-    if not documents:
-        return []
-
-    if not ENABLE_RERANKER:
-
-        return [
-            (
-                index,
-                0.0,
-            )
-            for index in range(
-                len(documents)
-            )
-        ]
-
-    pairs = [
-        (
-            query,
-            document,
-        )
-        for document in documents
-    ]
-
-    model = get_reranker_model()
-
-    with torch.inference_mode():
-
-        scores = model.predict(
-            pairs,
-            batch_size=2,
-            show_progress_bar=False,
-        )
-
-    scored_results = [
-        (
-            index,
-            float(score),
-        )
-        for index, score in enumerate(
-            scores
-        )
-    ]
-
-    scored_results.sort(
-        key=lambda item: item[1],
-        reverse=True,
-    )
-
-    return scored_results
-
-
-# ============================================================
-# CHECK RERANKER STATUS
-# ============================================================
-
-def is_reranker_enabled():
-
-    return ENABLE_RERANKER
-
-
-# ============================================================
-# LOCAL TEST
-# ============================================================
-
-if __name__ == "__main__":
-
-    print()
-    print(
-        "CrossEncoder:",
-        MODEL_NAME,
-    )
-
-    print(
-        "Reranker enabled:",
-        ENABLE_RERANKER,
-    )
-
-    if not ENABLE_RERANKER:
-
-        print(
-            "Reranker is disabled."
-        )
-
-    else:
-
-        query = (
-            "What programming languages "
-            "does the candidate know?"
-        )
-
-        documents = [
-            (
-                "The candidate knows "
-                "Python, Java and SQL."
-            ),
-            (
-                "The candidate worked on "
-                "an AI Resume Analyzer project."
-            ),
-            (
-                "The candidate has experience "
-                "with Flask and REST APIs."
-            ),
-        ]
-
-        results = rerank(
-            query,
-            documents,
-        )
-
-        print()
-
-        for index, score in results:
-
-            print(
-                f"Index: {index}, "
-                f"Score: {score:.4f}"
-            )
+# =============================================
