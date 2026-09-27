@@ -1,8 +1,4 @@
-import os
-from threading import Lock
-
-import torch
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 
 
 # ============================================================
@@ -13,29 +9,10 @@ MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
 
 # ============================================================
-# CPU / MEMORY CONFIGURATION
-# ============================================================
-
-# Keep PyTorch from creating too many CPU threads.
-try:
-    torch.set_num_threads(
-        int(os.getenv("TORCH_NUM_THREADS", "1"))
-    )
-except Exception:
-    pass
-
-try:
-    torch.set_num_interop_threads(1)
-except Exception:
-    pass
-
-
-# ============================================================
 # LAZY-LOADED MODEL
 # ============================================================
 
 _model = None
-_model_lock = Lock()
 
 
 # ============================================================
@@ -44,31 +21,16 @@ _model_lock = Lock()
 
 def get_embedding_model():
     """
-    Load the embedding model only when it is actually needed.
-
-    The model is loaded once and reused.
-
-    CPU + low-memory loading is used to reduce memory pressure
-    on low-memory hosting environments such as Render.
+    Load the FastEmbed model only when needed.
+    The model is reused after the first load.
     """
 
     global _model
 
     if _model is None:
-
-        with _model_lock:
-
-            if _model is None:
-
-                _model = SentenceTransformer(
-                    MODEL_NAME,
-                    device="cpu",
-                    model_kwargs={
-                        "low_cpu_mem_usage": True,
-                    },
-                )
-
-                _model.eval()
+        _model = TextEmbedding(
+            model_name=MODEL_NAME
+        )
 
     return _model
 
@@ -79,34 +41,20 @@ def get_embedding_model():
 
 def generate_embedding(text: str):
     """
-    Generate an embedding for a single text string.
-
-    Returns:
-        numpy.ndarray
+    Generate a 384-dimensional embedding
+    for a single text string.
     """
 
-    if not text:
-        raise ValueError(
-            "Text cannot be empty"
-        )
+    if not text or not text.strip():
+        raise ValueError("Text cannot be empty")
 
     text = text.strip()
 
-    if not text:
-        raise ValueError(
-            "Text cannot be empty"
-        )
-
     model = get_embedding_model()
 
-    with torch.inference_mode():
-
-        embedding = model.encode(
-            text,
-            convert_to_numpy=True,
-            normalize_embeddings=True,
-            show_progress_bar=False,
-        )
+    embedding = next(
+        model.embed([text])
+    )
 
     return embedding
 
@@ -115,13 +63,12 @@ def generate_embedding(text: str):
 # GENERATE MULTIPLE EMBEDDINGS
 # ============================================================
 
-def generate_embeddings(
-    texts: list[str],
-):
+def generate_embeddings(texts: list[str]):
     """
-    Generate embeddings for multiple texts.
+    Generate embeddings for multiple text chunks.
 
-    This function is useful during document ingestion.
+    Returns:
+        list of numpy arrays
     """
 
     if not texts:
@@ -138,15 +85,11 @@ def generate_embeddings(
 
     model = get_embedding_model()
 
-    with torch.inference_mode():
-
-        embeddings = model.encode(
-            cleaned_texts,
-            batch_size=8,
-            convert_to_numpy=True,
-            normalize_embeddings=True,
-            show_progress_bar=False,
+    embeddings = list(
+        model.embed(
+            cleaned_texts
         )
+    )
 
     return embeddings
 
