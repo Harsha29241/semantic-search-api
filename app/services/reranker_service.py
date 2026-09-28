@@ -156,3 +156,80 @@ def rerank_results(
 # ============================================================
 # RERANK PLAIN DOCUMENTS
 # =============================================
+# ============================================================
+# RERANK PLAIN DOCUMENTS
+# ============================================================
+
+def rerank(
+    query: str,
+    documents: list[str],
+) -> list[tuple[int, float]]:
+    """
+    Re-rank plain document strings.
+
+    Returns:
+        [
+            (original_index, score),
+            ...
+        ]
+
+    Sorted from highest score to lowest score.
+
+    When reranker is disabled, returns the original indexes
+    with a score of 0.0 without loading Torch.
+    """
+
+    if not documents:
+        return []
+
+    # IMPORTANT:
+    # Keep reranker disabled on Render by default.
+    if not ENABLE_RERANKER:
+        return [
+            (index, 0.0)
+            for index in range(len(documents))
+        ]
+
+    pairs = [
+        (query, document)
+        for document in documents
+    ]
+
+    model = get_reranker_model()
+
+    import torch
+
+    with torch.inference_mode():
+
+        scores = model.predict(
+            pairs,
+            batch_size=2,
+            show_progress_bar=False,
+        )
+
+    scored_results = [
+        (
+            index,
+            float(score),
+        )
+        for index, score in enumerate(scores)
+    ]
+
+    scored_results.sort(
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
+    return scored_results
+
+
+# ============================================================
+# STATUS
+# ============================================================
+
+def is_reranker_enabled() -> bool:
+    """
+    Return whether CrossEncoder reranking is enabled.
+    """
+
+    return ENABLE_RERANKER
